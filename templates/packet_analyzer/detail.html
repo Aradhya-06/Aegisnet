@@ -5,10 +5,10 @@
 <div class="d-flex flex-wrap gap-2 mb-3 align-items-center">
   <a class="btn btn-sm btn-outline-secondary" href="{% url 'packet_analyzer:index' %}"><i class="bi bi-arrow-left"></i> Captures</a>
   <a class="btn btn-sm btn-accent" href="{% url 'packet_analyzer:download' cap.pk %}"><i class="bi bi-download"></i> Download PCAP</a>
-  <button class="btn btn-sm btn-outline-accent" id="btn-tshark" {% if not tshark %}disabled title="tshark not installed"{% endif %}>Decode with TShark</button>
+  <!--<button class="btn btn-sm btn-outline-accent" id="btn-tshark" {% if not tshark %}disabled title="tshark not installed"{% endif %}>Decode with TShark</button>
   <span class="small text-secondary">Download the PCAP and open it in Wireshark for full visual inspection. Snaplen {{ cap.snaplen }}{% if cap.bpf_filter %} · filter <code>{{ cap.bpf_filter }}</code>{% endif %}.</span>
 </div>
-{% if cap.traffic %}<div class="chip-row mb-3">{% for t in cap.traffic %}<span class="chip">{{ t.kind|upper }} traffic: <b class="ms-1 {% if t.ok %}text-success{% else %}text-danger{% endif %}">{% if t.ok %}ok{% else %}failed{% endif %}</b>{% if t.detail %}<span class="ms-1 text-secondary">{{ t.detail }}</span>{% endif %}</span>{% endfor %}</div>{% endif %}
+{% if cap.traffic %}<div class="chip-row mb-3">{% for t in cap.traffic %}<span class="chip">{{ t.kind|upper }} traffic: <b class="ms-1 {% if t.ok %}text-success{% else %}text-danger{% endif %}">{% if t.ok %}ok{% else %}failed{% endif %}</b>{% if t.detail %}<span class="ms-1 text-secondary">{{ t.detail }}</span>{% endif %}</span>{% endfor %}</div>{% endif %}-->
 
 <div class="row g-3 mb-3">
   <div class="col-lg-4"><div class="card h-100"><div class="card-header">Protocol mix ({{ cap.packet_count }} packets)</div><div class="card-body"><div class="chart-box"><canvas id="ch-mix"></canvas></div></div></div></div>
@@ -28,7 +28,7 @@
   <tbody>{% for p in page %}<tr><td>{{ p.index }}</td><td>{{ p.ts }}</td><td title="{{ p.src_mac }}">{{ p.src_ip|default:p.src_mac }}</td><td title="{{ p.dst_mac }}">{{ p.dst_ip|default:p.dst_mac }}</td><td><span class="pill pill-info">{{ p.proto }}{% if p.app %} · {{ p.app|upper }}{% endif %}</span></td><td>{% if p.sport %}{{ p.sport }} → {{ p.dport }}{% endif %}</td><td>{{ p.length }}</td><td>{{ p.tcp_flags }}</td><td>{{ p.ttl|default_if_none:"" }}</td><td style="max-width:520px;word-break:break-word">{{ p.info }}</td></tr>
   {% empty %}<tr><td colspan="10" class="empty">no packets match</td></tr>{% endfor %}</tbody></table></div></div>
 <nav class="d-flex gap-2 justify-content-center mt-3">{% if page.has_previous %}<a class="btn btn-sm btn-outline-secondary" href="?proto={{ proto }}&q={{ q|urlencode }}&page={{ page.previous_page_number }}">‹ prev</a>{% endif %}<span class="small text-secondary align-self-center">page {{ page.number }} of {{ page.paginator.num_pages }}</span>{% if page.has_next %}<a class="btn btn-sm btn-outline-secondary" href="?proto={{ proto }}&q={{ q|urlencode }}&page={{ page.next_page_number }}">next ›</a>{% endif %}</nav>
-<pre class="out mt-3" id="tshark-out" style="display:none"></pre>
+<!--<pre class="out mt-3" id="tshark-out" style="display:none"></pre>-->
 {% endblock %}
 {% block scripts %}
 <script>

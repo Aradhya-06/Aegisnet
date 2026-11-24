@@ -96,7 +96,7 @@ def tshark(request, pk):
     exe = shutil.which("tshark")
     if not exe:
         return JsonResponse({"ok": False, "output": "tshark is not installed (sudo apt install tshark)"})
-    cmd = [exe, "-r", str(path), "-c", "40", "-d", "udp.port==5353,dns", "-T", "fields", "-E", "separator=|",
+    cmd = [exe, "-n","-r", str(path), "-c", "40", "-d", "udp.port==5353,dns", "-T", "fields", "-E", "separator=|",
            "-e", "frame.number", "-e", "ip.src", "-e", "ip.dst", "-e", "_ws.col.Protocol", "-e", "frame.len", "-e", "_ws.col.Info"]
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
