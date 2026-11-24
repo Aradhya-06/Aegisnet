@@ -1,0 +1,53 @@
+{% load static %}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{ csrf_token }}">
+  <title>{% block title %}AegisNet{% endblock %} · AegisNet</title>
+  <link rel="stylesheet" href="{% static 'vendor/bootstrap.min.css' %}">
+  <link rel="stylesheet" href="{% static 'vendor/bootstrap-icons.min.css' %}">
+  <link rel="stylesheet" href="{% static 'css/aegis.css' %}">
+  {% block head %}{% endblock %}
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar">
+    <div class="brand"><i class="bi bi-shield-check"></i><div>AegisNet<small>NETWORK OPERATIONS</small></div></div>
+    <nav>
+      {% for item in nav_items %}
+        <a class="nav-item {% if item.active %}active{% endif %}" href="{% url item.url %}">
+          <i class="bi bi-{{ item.icon }}"></i><span>{{ item.label }}</span>
+        </a>
+      {% endfor %}
+    </nav>
+  </aside>
+  <div class="main">
+    <header class="topbar">
+      <h1>{% block heading %}{% endblock %}</h1>
+      <div class="d-flex align-items-center gap-3">
+        <span class="pill pill-{{ lab.mode }} mode-badge" data-bs-toggle="tooltip" title="{{ lab.reason }}">
+          {% if lab.live %}● LIVE · namespace lab{% else %}◌ SIMULATED{% endif %}
+        </span>
+        {% if user.is_authenticated %}
+        <form method="post" action="{% url 'logout' %}" class="m-0">{% csrf_token %}
+          <button class="btn btn-sm btn-outline-secondary" title="Signed in as {{ user.username }}"><i class="bi bi-box-arrow-right"></i> {{ user.username }}</button>
+        </form>
+        {% endif %}
+      </div>
+    </header>
+    <main class="content">
+      {% if not lab.live %}
+     <!-- <div class="note warn mb-3"><b>Simulation mode.</b> {{ lab.reason }}. Pages that need the live lab show clearly labelled simulated results or explain what is missing; no measurement is invented.</div>-->
+      {% endif %}
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</div>
+<script src="{% static 'vendor/bootstrap.bundle.min.js' %}"></script>
+<script src="{% static 'vendor/chart.umd.js' %}"></script>
+<script src="{% static 'js/app.js' %}"></script>
+<script>$$('[data-bs-toggle="tooltip"]').forEach(el => new bootstrap.Tooltip(el));</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

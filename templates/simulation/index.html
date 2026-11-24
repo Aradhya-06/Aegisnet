@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}NS2 Simulation{% endblock %}
+{% block heading %}NS2 Simulation{% endblock %}
+{% block content %}
+<!--<div class="note warn mb-3"><b>Everything on this page is SIMULATED.</b> Numbers come from the NS2 trace file of a simulated network (n0…n5 mirror PC A, R1, R2, R3, PC B, PC C). They are <u>not</u> measurements of this computer or of the live lab. A scenario only has results after NS2 has actually run it.
+  {% if ns_path %}<br>NS2 binary: <code>{{ ns_path }}</code>{% else %}<br><b>NS2 is not installed</b> — scenarios cannot run. Install with <code>sudo apt install ns2</code>.{% endif %}</div>
+-->
+<div class="row g-3 mb-3">
+  {% for key, s in scenarios.items %}
+  <div class="col-md-6 col-xl-3"><div class="card h-100"><div class="card-body d-flex flex-column">
+    <div class="fw-semibold mb-1">{{ s.title }}</div><div class="small text-secondary mb-3 flex-grow-1">{{ s.description }}</div>
+    <div class="d-flex gap-2"><button class="btn btn-sm btn-accent run-btn" data-key="{{ key }}" {% if not ns_path %}disabled{% endif %}><i class="bi bi-play-fill"></i> Run NS2</button>
+      <button class="btn btn-sm btn-outline-secondary tcl-btn" data-key="{{ key }}">Tcl</button></div>
+  </div></div></div>
+  {% endfor %}
+</div>
+<pre class="out mb-3" id="tcl-out" style="display:none"></pre>
+
+<div class="card mb-3"><div class="card-header">Scenario comparison <span class="small text-secondary fw-normal">headline flow: TCP PC A → PC B · latest executed run of each scenario</span></div>
+  <div class="table-responsive"><table class="table table-sm"><thead><tr><th>Scenario</th><th>Run</th><th class="text-end">Throughput</th><th class="text-end">Avg delay</th><th class="text-end">PDR</th><th class="text-end">Loss ratio</th><th class="text-end">Sent / delivered / dropped</th></tr></thead><tbody id="tb-cmp"><tr><td colspan="7" class="empty">loading…</td></tr></tbody></table></div></div>
+
+<div class="row g-3 mb-3">
+  <div class="col-lg-6"><div class="card h-100"><div class="card-header">Throughput, delay, PDR <select id="metric" class="form-select form-select-sm w-auto"><option value="throughput">Throughput (Mbit/s)</option><option value="delay">Avg delay (ms)</option><option value="pdr">Packet delivery ratio (%)</option><option value="loss">Loss ratio (%)</option></select></div><div class="card-body"><div class="chart-box"><canvas id="ch-bar"></canvas></div></div></div></div>
+  <div class="col-lg-6"><div class="card h-100"><div class="card-header">TCP throughput over simulated time (Mbit/s)</div><div class="card-body"><div class="chart-box"><canvas id="ch-series"></canvas></div><div class="how mt-2">Scenario C shows the dip at t = 4 s when R1–R2 fails and the recovery after DV re-routes via R3; the link returns at t = 8 s.</div></div></div></div>
+</div>
+
+<div class="card"><div class="card-header">Run history</div><div class="table-responsive"><table class="table table-sm"><thead><tr><th>#</th><th>Time</th><th>Scenario</th><th>Status</th><th>Executed</th><th>Seconds</th><th></th></tr></thead><tbody id="tb-runs">
+  {% for r in runs %}<tr><td>{{ r.pk }}</td><td class="mono">{{ r.created|date:"H:i:s" }}</td><td>{{ r.scenario }}</td><td><span class="pill pill-{% if r.status == 'completed' %}success{% elif r.status == 'not_available' %}warning{% else %}failed{% endif %}">{{ r.status }}</span></td><td>{{ r.executed|yesno:"yes,no" }}</td><td>{{ r.duration_s|default_if_none:"—" }}</td><td class="small text-secondary">{% if not r.executed %}{{ r.log_tail|truncatechars:80 }}{% endif %}</td></tr>{% empty %}<tr><td colspan="7" class="empty">no runs yet</td></tr>{% endfor %}</tbody></table></div></div>
+{% endblock %}
+{% block scripts %}
+<script>
+let data = null;
+const bar = new Chart($("#ch-bar"), { type: "bar", data: { labels: [], datasets: [{ data: [], backgroundColor: PALETTE }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } } });
+const series = new Chart($("#ch-series"), { type: "line", data: { labels: [], datasets: [] }, options: { animation: false, responsive: true, maintainAspectRatio: false, elements: { point: { radius: 0 } }, scales: { x: { title: { display: true, text: "simulated seconds" }, ticks: { maxTicksLimit: 10 } }, y: { beginAtZero: true } } } });
+function metricVal(h, m) {
+  if (m === "throughput") return h.throughput_bps / 1e6; if (m === "delay") return h.avg_delay_ms;
+  if (m === "pdr") return h.pdr === null ? null : h.pdr * 100; return h.loss_ratio === null ? null : h.loss_ratio * 100;
+}
+function renderCmp() {
+  const rows = Object.entries(data.scenarios);
+  $("#tb-cmp").innerHTML = rows.map(([k, s]) => { const h = s.run && s.run.headline; return h && h.label ? `<tr><td>${esc(s.title)}</td><td class="mono">#${s.run.id} · ${esc(s.run.created)}</td><td class="text-end mono">${fmtNum(h.throughput_bps / 1e6, 3, " Mbit/s")}</td><td class="text-end mono">${fmtNum(h.avg_delay_ms, 2, " ms")}</td><td class="text-end mono">${fmtNum(h.pdr * 100, 2, " %")}</td><td class="text-end mono">${fmtNum(h.loss_ratio * 100, 2, " %")}</td><td class="text-end mono">${h.sent} / ${h.delivered} / ${h.dropped}</td></tr>` : `<tr><td>${esc(s.title)}</td><td colspan="6" class="text-secondary">not run yet — no results exist</td></tr>`; }).join("");
+  const have = rows.filter(([, s]) => s.run && s.run.headline && s.run.headline.label);
+  const m = $("#metric").value;
+  bar.data.labels = have.map(([, s]) => s.title); bar.data.datasets[0].data = have.map(([, s]) => metricVal(s.run.headline, m)); bar.update();
+  series.data.labels = have.length ? have[0][1].series.map(p => p.t) : [];
+  series.data.datasets = have.map(([, s], i) => ({ label: s.title, data: s.series.map(p => p.throughput_bps / 1e6), borderColor: PALETTE[i % PALETTE.length], tension: .2, borderWidth: 2 })); series.update();
+}
+async function load() { data = await api("{% url 'simulation:api_compare' %}"); renderCmp(); }
+$("#metric").onchange = () => data && renderCmp();
+$$(".run-btn").forEach(b => b.onclick = async () => {
+  setBusy(b, true, "Simulating…");
+  try { const r = await api("{% url 'simulation:api_run' %}", { form: { scenario: b.dataset.key } }); toast(r.executed ? "NS2 run completed" : "Run " + r.status + ": " + r.log, r.executed ? "success" : "error"); await load(); setTimeout(() => location.reload(), 900); }
+  catch (e) { toast(e.message, "error"); }
+  setBusy(b, false);
+});
+$$(".tcl-btn").forEach(b => b.onclick = async () => { const d = await api("{% url 'simulation:api_script' %}?scenario=" + b.dataset.key); const o = $("#tcl-out"); o.style.display = ""; o.textContent = d.tcl; o.scrollIntoView({ behavior: "smooth" }); });
+load();
+</script>
+{% endblock %}

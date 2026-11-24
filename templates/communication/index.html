@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}TCP / UDP{% endblock %}
+{% block heading %}TCP and UDP communication{% endblock %}
+{% block content %}
+<!--<div class="note mb-3">These are real socket programs (<code>communication/tcp_server.py</code>, <code>udp_server.py</code>, <code>client.py</code>), separate from Django. In live mode the client runs <b>inside the chosen lab node</b>, so its packets cross the virtual routers and can be captured in the <a href="{% url 'packet_analyzer:index' %}">Packet Analyzer</a>.</div>-->
+<div class="row g-3 mb-3">
+  <div class="col-lg-5">
+    <div class="card h-100"><div class="card-header">Test servers <button class="btn btn-sm btn-outline-secondary" id="btn-svc-refresh">Refresh</button></div>
+      <div class="table-responsive"><table class="table table-sm"><thead><tr><th>Service</th><th>Address</th><th>State</th><th></th></tr></thead><tbody id="tb-svc">
+        {% for s in services %}<tr data-name="{{ s.name }}"><td>{{ s.label }}</td><td class="mono">{{ s.host }}:{{ s.port }}/{{ s.proto }}</td><td></td><td></td></tr>{% empty %}<tr><td colspan="4" class="empty">no services available</td></tr>{% endfor %}</tbody></table></div>
+    </div>
+  </div>
+  <div class="col-lg-7">
+   <div class="card h-100"><div class="card-header">Send</div><div class="card-body">
+      <form id="f-send" class="row g-2">
+        <div class="col-md-3"><label class="form-label small">Protocol</label><select name="proto" id="proto" class="form-select form-select-sm"><option value="tcp">TCP</option><option value="udp">UDP</option></select></div>
+        <div class="col-md-3"><label class="form-label small">From node</label><select name="src" id="src" class="form-select form-select-sm">{% for v,l in sources %}<option value="{{ v }}">{{ l }}</option>{% endfor %}</select></div>
+        <div class="col-md-4"><label class="form-label small">Destination IP</label><input name="host" id="host" class="form-control form-control-sm mono" required></div>
+        <div class="col-md-2"><label class="form-label small">Port</label><input name="port" id="port" type="number" class="form-control form-control-sm" value="9001" required></div>
+        <div class="col-12"><label class="form-label small">Message</label><input name="message" class="form-control form-control-sm" value="hello from AegisNet"></div>
+        <div class="col-md-6" id="file-box"><label class="form-label small">…or a file (TCP)</label><input type="file" name="file" class="form-control form-control-sm"></div>
+        <div class="col-md-3" id="sample-box"><label class="form-label small d-block">&nbsp;</label><div class="form-check"><input type="checkbox" class="form-check-input" name="use_sample" value="1" id="use-sample"><label class="form-check-label small" for="use-sample">send the sample file</label></div></div>
+        <div class="col-md-3" id="count-box" style="display:none"><label class="form-label small">Datagrams</label><input name="count" type="number" min="1" max="50" value="10" class="form-control form-control-sm"></div>
+        <div class="col-12 d-flex gap-2"><button class="btn btn-accent btn-sm">Send</button><button type="button" class="btn btn-outline-accent btn-sm" id="btn-compare">Compare TCP vs UDP</button></div>
+      </form>
+    </div></div>
+  </div>
+</div>
+
+<div id="result" class="mb-3"></div>
+
+<div class="card"><div class="card-header">Recent sessions</div><div class="table-responsive"><table class="table table-sm"><thead><tr><th>Time</th><th>Proto</th><th>From → To</th><th>Kind</th><th>Status</th><th class="text-end">Connect</th><th class="text-end">Total</th></tr></thead><tbody id="tb-hist">
+  {% for h in history %}<tr><td class="mono">{{ h.created|time:"H:i:s" }}</td><td>{{ h.proto|upper }}</td><td class="mono">{{ h.src_node }} → {{ h.dst_host }}:{{ h.dst_port }}</td><td>{{ h.kind }}</td><td><span class="pill pill-{% if h.ok %}success{% else %}failed{% endif %}">{{ h.status }}</span></td><td class="text-end mono">{{ h.connect_ms|default_if_none:"—" }}</td><td class="text-end mono">{{ h.total_ms|default_if_none:"—" }}</td></tr>{% empty %}<tr><td colspan="7" class="empty">nothing sent yet</td></tr>{% endfor %}</tbody></table></div></div>
+{% endblock %}
+{% block scripts %}
+<script>
+const DEFAULT_DST = {{ default_dst|safe }};
+function applyDefaults() {
+  const src = $("#src").value;
+  const lab = Object.keys(DEFAULT_DST).length && src !== "host";
+  // default destination: PC B for a lab source (PC A/C), loopback for the host
+  const dst = !lab ? "127.0.0.1" : (src === "b" ? DEFAULT_DST["c"] : DEFAULT_DST["b"]);
+  $("#host").value = dst || "127.0.0.1";
+}
+function applyProto() {
+  const udp = $("#proto").value === "udp";
+  $("#port").value = udp ? 9002 : 9001;
+  $("#file-box").style.display = $("#sample-box").style.display = udp ? "none" : "";
+  $("#count-box").style.display = udp ? "" : "none";
+}
+$("#src").onchange = applyDefaults; $("#proto").onchange = applyProto; applyDefaults(); applyProto();
+
+function renderSvc(list) {
+  $("#tb-svc").innerHTML = list.map(s => `<tr><td>${esc(s.label)}</td><td class="mono">${esc(s.host)}:${s.port}/${esc(s.proto)}</td><td>${statusPill(s.running ? "up" : "down")}</td>
+    <td class="text-end">${s.running ? `<button class="btn btn-sm btn-outline-danger" data-act="stop" data-name="${esc(s.name)}">Stop</button>` : `<button class="btn btn-sm btn-outline-accent" data-act="start" data-name="${esc(s.name)}">Start</button>`}</td></tr>`).join("")
+    || '<tr><td colspan="4" class="empty">no services available</td></tr>';
+}
+async function loadSvc() { try { renderSvc((await api("{% url 'communication:api_services' %}")).services); } catch (e) { toast(e.message, "error"); } }
+$("#tb-svc").onclick = async (e) => {
+  const b = e.target.closest("button"); if (!b) return; setBusy(b, true, "…");
+  try { renderSvc((await api("{% url 'communication:api_service_action' %}", { form: { name: b.dataset.name, action: b.dataset.act } })).services); }
+  catch (err) { toast(err.message, "error"); setBusy(b, false); }
+};
+$("#btn-svc-refresh").onclick = loadSvc; loadSvc();
+
+function resultCard(r, title) {
+  const ok = r.ok;
+  let body = `<div class="d-flex flex-wrap gap-2 mb-2">${pill(r.status || "error", ok ? "success" : "failed")} ${pill(r.mode === "live" ? "live · ran in " + r.ran_in : "host", r.mode === "live" ? "live" : "unknown")}
+    ${r.connect_ms != null ? `<span class="chip">connect ${r.connect_ms} ms</span>` : ""}<span class="chip">total ${r.total_ms ?? "—"} ms</span>
+    ${r.sent != null ? `<span class="chip">sent ${r.sent} · answered ${r.received} · lost ${r.lost} (${r.loss_pct}%)</span>` : ""}
+    ${r.integrity_ok !== undefined ? `<span class="chip">SHA-256 ${r.integrity_ok ? "matches" : "DIFFERS"}</span>` : ""}</div>`;
+  if (r.error) body += `<div class="note bad mb-2">${esc(r.error)}</div>`;
+  if (r.response) body += `<div class="small mb-2"><b>Server reply:</b> <code>${esc(JSON.stringify(r.response))}</code></div>`;
+  if (r.datagrams) body += '<div class="chip-row mb-2">' + r.datagrams.map(d => `<span class="chip" title="${d.answered ? d.rtt_ms + ' ms' : 'no reply'}">#${d.seq} ${d.answered ? "✓ " + d.rtt_ms + " ms" : "✗ lost"}</span>`).join("") + "</div>";
+  body += stepsHtml(r.steps);
+  return `<div class="card"><div class="card-header">${esc(title)}</div><div class="card-body">${body}</div></div>`;
+}
+$("#f-send").onsubmit = async (e) => {
+  e.preventDefault(); const btn = e.submitter; setBusy(btn, true, "Sending…");
+  try { const d = await api("{% url 'communication:api_send' %}", { form: new FormData(e.target) }); $("#result").innerHTML = resultCard(d.result, $("#proto").value.toUpperCase() + " result"); loadHist(); }
+  catch (err) { $("#result").innerHTML = `<div class="note bad">${esc(err.message)}</div>`; }
+  setBusy(btn, false);
+};
+$("#btn-compare").onclick = async (e) => {
+  setBusy(e.currentTarget, true, "Comparing…");
+  try {
+    const fd = new FormData($("#f-send")); const d = await api("{% url 'communication:api_compare' %}", { form: { src: fd.get("src"), host: fd.get("host") } });
+    $("#result").innerHTML = `<div class="row g-3"><div class="col-lg-6">${resultCard(d.tcp, "TCP: connection-oriented, reliable stream")}</div><div class="col-lg-6">${resultCard(d.udp, "UDP: 10 independent datagrams")}</div></div>
+      <div class="note mt-3">TCP needed a 3-way handshake and a FIN exchange; UDP just sent datagrams and reports exactly which were answered. To see the difference on a lossy path run <code>sudo scripts/impair_link.sh r1-r2 loss 20</code> (needs the netem kernel module): TCP retransmits and still succeeds, UDP loses datagrams.</div>`;
+    loadHist();
+  } catch (err) { $("#result").innerHTML = `<div class="note bad">${esc(err.message)}</div>`; }
+  setBusy(e.currentTarget, false);
+};
+async function loadHist() {
+  const d = await api("{% url 'communication:api_history' %}");
+  $("#tb-hist").innerHTML = d.history.map(h => `<tr><td class="mono">${esc(h.created)}</td><td>${esc(h.proto.toUpperCase())}</td><td class="mono">${esc(h.src)} → ${esc(h.dst)}</td><td>${esc(h.kind)}</td><td>${pill(h.status, h.ok ? "success" : "failed")}</td><td class="text-end mono">${h.connect_ms ?? "—"}</td><td class="text-end mono">${h.total_ms ?? "—"}</td></tr>`).join("") || '<tr><td colspan="7" class="empty">nothing sent yet</td></tr>';
+}
+</script>
+{% endblock %}

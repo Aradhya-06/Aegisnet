@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Packet Analyzer{% endblock %}
+{% block heading %}Packet Analyzer{% endblock %}
+{% block content %}
+<!--<div class="note mb-3"><b>Privacy and safety.</b> Capture runs with <code>tcpdump</code> inside a lab namespace (or on the host loopback <code>lo</code> only) — never on your real Wi-Fi/Ethernet. Only packet <b>metadata</b> is stored; application payloads are not kept, and TLS data shows only the handshake and “N bytes of encrypted data”. Capturing needs root: it goes through the restricted helper <code>scripts/ns_exec.py</code>.</div>-->
+<div class="row g-3 mb-3">
+  <div class="col-lg-7"><div class="card h-100"><div class="card-header">New capture</div><div class="card-body">
+    <form id="f-cap" class="row g-2">
+      <div class="col-md-4"><label class="form-label small">Node</label><select name="node" id="node" class="form-select form-select-sm">{% for v,l in nodes %}<option value="{{ v }}" {% if v == 'r1' %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></div>
+      <div class="col-md-4"><label class="form-label small">Interface</label><select name="interface" id="iface" class="form-select form-select-sm"></select></div>
+      <div class="col-md-2"><label class="form-label small">Seconds</label><input name="duration" type="number" min="2" max="60" value="8" class="form-control form-control-sm"></div>
+      <div class="col-md-2"><label class="form-label small">Snaplen</label><select name="snaplen" class="form-select form-select-sm"><option value="96">96 (headers only)</option><option value="512" selected>512</option><option value="1500">1500</option></select></div>
+      <div class="col-12"><label class="form-label small">Capture filter (optional, BPF words)</label><input name="bpf" class="form-control form-control-sm mono" placeholder="e.g. tcp and port 8080"></div>
+      <div class="col-12"><label class="form-label small d-block">Generate real test traffic while capturing (starts the needed test servers)</label>
+        {% for t in traffic_types %}<div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" name="traffic" value="{{ t }}" id="tr-{{ t }}" checked><label class="form-check-label small" for="tr-{{ t }}">{{ t|upper }}</label></div>{% endfor %}</div>
+      <div class="col-12"><button class="btn btn-accent btn-sm">Start capture</button> <span id="cap-status" class="small text-secondary ms-2"></span></div>
+    </form></div></div></div>
+  <!--<div class="col-lg-5"><div class="card h-100"><div class="card-header">Where to capture</div><div class="card-body small">
+    Traffic from PC A to PC B passes <b>R1</b>. Capture on <code>r1</code> / <code>r1-a</code> to see everything PC A sends, or on <code>r1-r2</code> to see what uses the primary link — after a failure and recovery the same flow appears on <code>r1-r3</code> instead.<br><br>
+    With the lab off (simulation mode) only the host loopback <code>lo</code> is available and the traffic is generated against 127.0.0.1.</div></div></div>
+</div>-->
+<div class="card"><div class="card-header">Captures</div><div class="table-responsive"><table class="table table-sm"><thead><tr><th>#</th><th>Time</th><th>Where</th><th>Filter</th><th>Packets</th><th>Status</th><th></th></tr></thead><tbody>
+  {% for c in captures %}<tr><td>{{ c.pk }}</td><td class="mono">{{ c.created|date:"H:i:s" }}</td><td class="mono">{{ c.node }}:{{ c.interface }}</td><td class="mono">{{ c.bpf_filter|default:"—" }}</td><td>{{ c.packet_count }}</td><td><span class="pill pill-{% if c.status == 'done' %}success{% else %}failed{% endif %}">{{ c.status }}</span>{% if c.error %} <span class="small text-danger">{{ c.error }}</span>{% endif %}</td><td class="text-end">{% if c.status == 'done' %}<a class="btn btn-sm btn-outline-accent" href="{% url 'packet_analyzer:detail' c.pk %}">Open</a>{% endif %}</td></tr>
+  {% empty %}<tr><td colspan="7" class="empty">no captures yet</td></tr>{% endfor %}</tbody></table></div></div>
+{% endblock %}
+{% block scripts %}
+<script>
+async function loadIfaces() {
+  const node = $("#node").value, sel = $("#iface");
+  sel.innerHTML = "<option>loading…</option>";
+  try {
+    const d = await api("{% url 'packet_analyzer:api_interfaces' %}?node=" + encodeURIComponent(node));
+    const names = (d.interfaces || []).filter(n => n !== "lo" || node === "host");
+    sel.innerHTML = names.map(n => `<option>${esc(n)}</option>`).join("") || "<option value=''>no interfaces</option>";
+    if (node === "r1" && names.includes("r1-a")) sel.value = "r1-a";
+    if (d.error) toast(d.error, "warning");
+  } catch (e) { sel.innerHTML = ""; toast(e.message, "error"); }
+}
+$("#node").onchange = loadIfaces; loadIfaces();
+$("#f-cap").onsubmit = async (e) => {
+  e.preventDefault(); const btn = e.submitter; setBusy(btn, true, "Capturing…");
+  $("#cap-status").textContent = "capturing and generating traffic — this takes several seconds";
+  try {
+    const d = await api("{% url 'packet_analyzer:api_capture' %}", { form: new FormData(e.target) });
+    if (d.status === "done") location.href = "{% url 'packet_analyzer:index' %}capture/" + d.id + "/";
+    else { toast("Capture failed: " + d.error, "error"); setTimeout(() => location.reload(), 2500); }
+  } catch (err) { toast(err.message, "error"); $("#cap-status").textContent = ""; }
+  setBusy(btn, false);
+};
+</script>
+{% endblock %}

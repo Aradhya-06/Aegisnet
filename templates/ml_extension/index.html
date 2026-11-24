@@ -1,0 +1,45 @@
+
+{% extends "base.html" %}
+{% block title %}ML Prediction{% endblock %}
+{% block heading %}Congestion prediction <span class="pill pill-info ms-2">optional extension</span>{% endblock %}
+{% block content %}
+<div class="note mb-3">The core system works without this page. No model, dataset or accuracy figure is bundled: everything below appears only after <b>you</b> collect or upload a labelled dataset and train. All metrics are computed on a held-out test set and compared with the conventional threshold detector.</div>
+{% if not libs %}
+<div class="note bad">scikit-learn / pandas are not installed. Run <code>pip install -r requirements-ml.txt</code>, then reload.</div>
+{% else %}
+<div class="row g-3 mb-3">
+  <div class="col-lg-6"><div class="card h-100"><div class="card-header">1 · Dataset</div><div class="card-body">
+    {% if dataset and not dataset.error %}<div class="mb-2"><b>{{ dataset.rows }}</b> labelled rows — {% for k, v in dataset.per_class.items %}<span class="chip me-1">{{ k }}: {{ v }}</span>{% endfor %}</div>
+    {% elif dataset %}<div class="note bad mb-2">{{ dataset.error }}</div>{% else %}<div class="text-secondary mb-2">No dataset yet.</div>{% endif %}
+    <div class="small text-secondary mb-3"><b>How labels are made (ground truth):</b> the lab link R1–R2 is shaped to {{ shaped }} Mbit/s and a UDP load is offered from PC A: {% for n, m in levels %}<b>{{ n }}</b> = {{ m }} Mbit/s{% if not forloop.last %}, {% endif %}{% endfor %}. Features are <u>measured</u> every second from real counters and ping. Collection needs the live lab, the root helper and the kernel module <code>sch_tbf</code> (about 3 minutes).</div>
+    <div class="d-flex gap-2 flex-wrap"><button class="btn btn-sm btn-accent" id="btn-collect" {% if collecting %}disabled{% endif %}>{% if collecting %}collecting…{% else %}Collect from live lab{% endif %}</button>
+      <form id="f-up" class="d-flex gap-2"><input type="file" name="file" accept=".csv" class="form-control form-control-sm"><button class="btn btn-sm btn-outline-secondary">Upload CSV</button></form></div>
+    <div class="small text-secondary mt-2">CSV columns: {% for f in features %}<code>{{ f }}</code> {% endfor %}<code>label</code> (normal / moderate / high)</div>
+  </div></div></div>
+  <div class="col-lg-6"><div class="card h-100"><div class="card-header">Features</div><div class="card-body"><dl class="mb-0 small">{% for k, v in features.items %}<dt class="mono">{{ k }}</dt><dd class="text-secondary">{{ v }}</dd>{% endfor %}</dl></div></div></div>
+</div>
+<div class="card mb-3"><div class="card-header">2 · Train &amp; evaluate <button class="btn btn-sm btn-accent" id="btn-train">Train Random Forest</button></div><div class="card-body" id="metrics"></div></div>
+<div class="card"><div class="card-header">3 · Predict now <button class="btn btn-sm btn-outline-accent" id="btn-predict">Predict from latest link measurement</button></div><div class="card-body" id="predict-out"><span class="text-secondary small">uses the latest stored measurement of link r1-r2 (open the Dashboard with the lab running to create them)</span></div></div>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<script>
+const INITIAL = {{ metrics_json|default:"null"|safe }};
+function metricsHtml(m) {
+  const pc = (x, name) => `<table class="table table-sm"><thead><tr><th>${name}</th><th>Accuracy</th><th>Macro precision</th><th>Macro recall</th><th>Macro F1</th></tr></thead><tbody><tr><td></td><td>${x.accuracy}</td><td>${x.macro_precision}</td><td>${x.macro_recall}</td><td>${x.macro_f1}</td></tr></tbody></table>`;
+  const cm = (x) => `<table class="table table-sm cm w-auto"><thead><tr><th></th>${x.labels.map(l => `<th>pred ${l}</th>`).join("")}</tr></thead><tbody>${x.confusion_matrix.map((r, i) => `<tr><th>true ${x.labels[i]}</th>${r.map((v, j) => `<td style="background:rgba(14,124,134,${Math.min(.85, v / Math.max(1, ...r) * (i === j ? .8 : .8))})">${v}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+  const cls = (x) => `<table class="table table-sm"><thead><tr><th>class</th><th>precision</th><th>recall</th><th>F1</th><th>support</th></tr></thead><tbody>${Object.entries(x.per_class).map(([k, v]) => `<tr><td>${k}</td><td>${v.precision}</td><td>${v.recall}</td><td>${v.f1}</td><td>${v.support}</td></tr>`).join("")}</tbody></table>`;
+  const imp = Object.entries(m.feature_importance), top = Math.max(...imp.map(i => i[1]));
+  return `<div class="small text-secondary mb-3">${esc(m.method)} · train ${m.dataset.train_rows} rows, test ${m.dataset.test_rows} rows</div>
+    <div class="row g-4"><div class="col-lg-6"><h6>Random Forest (test set)</h6>${pc(m.ml, "model")}${cls(m.ml)}<div class="small text-secondary">Confusion matrix</div>${cm(m.ml)}</div>
+      <div class="col-lg-6"><h6>Threshold detector (same test rows)</h6>${pc(m.threshold_baseline, "baseline")}${cls(m.threshold_baseline)}<div class="small text-secondary">Confusion matrix</div>${cm(m.threshold_baseline)}</div></div>
+    <h6 class="mt-3">Feature importance</h6>${imp.map(([k, v]) => `<div class="d-flex align-items-center gap-2 mb-1"><span class="mono" style="width:170px">${esc(k)}</span><div class="bar" style="width:${v / top * 60}%"></div><span class="small">${v}</span></div>`).join("")}`;
+}
+if (INITIAL) $("#metrics").innerHTML = metricsHtml(INITIAL); else $("#metrics").innerHTML = '<div class="empty">not trained yet</div>';
+$("#btn-train")?.addEventListener("click", async (e) => { setBusy(e.currentTarget, true, "Training…"); try { $("#metrics").innerHTML = metricsHtml(await api("{% url 'ml_extension:api_train' %}", { post: true })); } catch (err) { toast(err.message, "error"); } setBusy(e.currentTarget, false); });
+$("#btn-predict")?.addEventListener("click", async () => { try { const d = await api("{% url 'ml_extension:api_predict' %}"); $("#predict-out").innerHTML = `<div class="d-flex gap-3 flex-wrap mb-2">${pill("ML: " + d.ml, "info")} ${pill("threshold rule: " + d.threshold, "info")}</div><div class="small">probabilities: ${esc(JSON.stringify(d.probabilities))}</div><div class="small text-secondary">features: ${esc(JSON.stringify(d.features))}</div>`; } catch (err) { toast(err.message, "error"); } });
+$("#btn-collect")?.addEventListener("click", async (e) => { if (!confirm("Collect from the live lab? It shapes link R1–R2 for about 3 minutes and cleans up afterwards.")) return; try { await api("{% url 'ml_extension:api_collect' %}", { post: true }); toast("collection started in the background (see data/run/ml-collector.log)", "success"); e.currentTarget.disabled = true; } catch (err) { toast(err.message, "error"); } });
+$("#f-up")?.addEventListener("submit", async (e) => { e.preventDefault(); try { const r = await api("{% url 'ml_extension:api_upload' %}", { form: new FormData(e.target) }); toast(r.rows + " rows imported", "success"); setTimeout(() => location.reload(), 800); } catch (err) { toast(err.message, "error"); } });
+</script>
+{% endblock %}
+

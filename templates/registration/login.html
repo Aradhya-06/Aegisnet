@@ -1,0 +1,30 @@
+{% load static %}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in · AegisNet</title>
+  <link rel="stylesheet" href="{% static 'vendor/bootstrap.min.css' %}">
+  <link rel="stylesheet" href="{% static 'vendor/bootstrap-icons.min.css' %}">
+  <link rel="stylesheet" href="{% static 'css/aegis.css' %}">
+</head>
+<body>
+<div class="login-wrap">
+  <div class="card login-card">
+    <div class="card-body p-4">
+      <div class="d-flex align-items-center gap-2 mb-1"><i class="bi bi-shield-check fs-3" style="color:var(--accent)"></i><span class="fs-4 fw-bold">AegisNet</span></div>
+      <p class="text-secondary small mb-4">Adaptive network monitoring, traffic analysis and self-healing</p>
+      {% if form.errors %}<div class="note bad mb-3">Wrong username or password.</div>{% endif %}
+      <form method="post">{% csrf_token %}
+        <label class="form-label small fw-semibold" for="id_username">Username</label>
+        <input class="form-control mb-3" name="username" id="id_username" autofocus required>
+        <label class="form-label small fw-semibold" for="id_password">Password</label>
+        <input class="form-control mb-3" type="password" name="password" id="id_password" required>
+        <input type="hidden" name="next" value="{{ next }}">
+        <button class="btn btn-accent w-100">Sign in</button>
+      </form>
+      <p class="text-secondary small mt-3 mb-0">Create the account with <code>python manage.py setup_aegisnet --create-user NAME --password PW</code></p>
+    </div>
+  </div>
+</div>
+</body>
+</html>

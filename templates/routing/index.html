@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% block title %}Routing Visualizer{% endblock %}
+{% block heading %}Routing Visualizer{% endblock %}
+{% block content %}
+<!--<div class="note mb-3" id="banner"><b>Educational model.</b> The algorithms below run in Python on the graph you see. They compute routes <u>on paper</u> and never change a Linux routing table. Use “Real Linux routes” to read what a lab router actually has; the <a href="{% url 'recovery:index' %}">Fault &amp; Recovery</a> page is the only place routes are really changed.</div>-->
+<div class="row g-3">
+  <div class="col-xl-8">
+    <div class="card mb-3"><div class="card-header"><span>Topology <span class="small text-secondary fw-normal">drag nodes · edit links on the right</span></span>
+      <span class="d-flex gap-2"><button class="btn btn-sm btn-outline-accent" id="btn-lab">Load lab topology</button>
+        <button class="btn btn-sm btn-outline-secondary" id="btn-clear">New</button></span></div>
+      <div class="card-body p-2"><svg id="topo" viewBox="0 0 760 460" height="460"></svg></div></div>
+    <div class="card"><div class="card-header">Run an algorithm</div><div class="card-body">
+      <div class="row g-2 align-items-end">
+        <div class="col-md-3"><label class="form-label small">Algorithm</label><select id="algo" class="form-select form-select-sm"><option value="link_state">Link State (Dijkstra)</option><option value="distance_vector">Distance Vector (Bellman-Ford)</option></select></div>
+        <div class="col-md-2"><label class="form-label small">Source</label><select id="src" class="form-select form-select-sm"></select></div>
+        <div class="col-md-2"><label class="form-label small">Destination</label><select id="dst" class="form-select form-select-sm"></select></div>
+        <div class="col-md-3 dv-only" style="display:none"><div class="form-check"><input class="form-check-input" type="checkbox" id="split" checked><label class="form-check-label small" for="split">split horizon</label></div>
+          <div class="form-check"><input class="form-check-input" type="checkbox" id="cont"><label class="form-check-label small" for="cont">continue from the previous run's tables</label></div></div>
+        <div class="col-md-2"><button class="btn btn-accent btn-sm w-100" id="btn-run">Run</button></div>
+      </div>
+      <div id="run-msg" class="mt-3"></div>
+    </div></div>
+  </div>
+  <div class="col-xl-4">
+    <div class="card mb-3"><div class="card-header">Add</div><div class="card-body">
+      <div class="input-group input-group-sm mb-2"><input id="new-node" class="form-control" placeholder="node name"><button class="btn btn-outline-accent" id="btn-add-node">Add node</button></div>
+      <div class="input-group input-group-sm"><select id="l-a" class="form-select"></select><select id="l-b" class="form-select"></select><input id="l-cost" type="number" min="1" max="1000" value="1" class="form-control" style="max-width:64px"><button class="btn btn-outline-accent" id="btn-add-link">Link</button></div>
+    </div></div>
+    <div class="card mb-3"><div class="card-header">Links <span class="small text-secondary fw-normal">change a cost or disable one, then Run again</span></div><div class="table-responsive" style="max-height:260px"><table class="table table-sm"><thead><tr><th>Link</th><th>Cost</th><th>On</th><th></th></tr></thead><tbody id="tb-links"></tbody></table></div></div>
+    <div class="card mb-3"><div class="card-header">Save practice topology</div><div class="card-body">
+      <div class="input-group input-group-sm mb-2"><input id="save-name" class="form-control" placeholder="name"><button class="btn btn-outline-secondary" id="btn-save">Save</button></div>
+      <select id="saved" class="form-select form-select-sm"><option value="">load saved…</option>{% for s in saved %}<option>{{ s.name }}</option>{% endfor %}</select></div></div>
+    <div class="card"><div class="card-header">Real Linux routes (lab router)</div><div class="card-body">
+      <div class="input-group input-group-sm mb-2"><select id="k-node" class="form-select">{% for v,l in nodes %}<option value="{{ v }}" {% if v == 'r1' %}selected{% endif %}>{{ l }}</option>{% endfor %}</select><button class="btn btn-outline-secondary" id="btn-kernel">ip route</button></div>
+      <pre class="out" id="kernel-out" style="max-height:170px">(press ip route)</pre></div></div>
+  </div>
+</div>
+<div id="results" class="mt-3"></div>
+{% endblock %}
+{% block scripts %}
+<script>
+let G = { nodes: [], links: [] }, route = [], lastGraph = null, lastPath = null;
+const svg = $("#topo"), NS = "http://www.w3.org/2000/svg";
+const key = (a, b) => [a, b].sort().join("|");
+
+function cloneGraph() { return JSON.parse(JSON.stringify(G)); }
+function fillSelects() {
+  const opts = G.nodes.map(n => `<option value="${esc(n.id)}">${esc(n.label || n.id)}</option>`).join("");
+  ["#src", "#dst", "#l-a", "#l-b"].forEach(s => { const keep = $(s).value; $(s).innerHTML = opts; if (G.nodes.some(n => n.id === keep)) $(s).value = keep; });
+  if (G.nodes.length > 1 && $("#src").value === $("#dst").value) $("#dst").selectedIndex = Math.min(1, G.nodes.length - 1);
+}
+function draw() {
+  svg.innerHTML = "";
+  const onRoute = new Set(), edgesOn = new Set();
+  route.forEach((n, i) => { onRoute.add(n); if (i) edgesOn.add(key(route[i - 1], n)); });
+  const byId = Object.fromEntries(G.nodes.map(n => [n.id, n]));
+  G.links.forEach(l => {
+    const a = byId[l.a], b = byId[l.b]; if (!a || !b) return;
+    const line = document.createElementNS(NS, "line");
+    line.setAttribute("x1", a.x); line.setAttribute("y1", a.y); line.setAttribute("x2", b.x); line.setAttribute("y2", b.y);
+    line.setAttribute("class", "edge" + (l.enabled ? "" : " off") + (edgesOn.has(key(l.a, l.b)) ? " route" : ""));
+    svg.appendChild(line);
+    const t = document.createElementNS(NS, "text"); t.setAttribute("class", "cost");
+    t.setAttribute("x", (a.x + b.x) / 2); t.setAttribute("y", (a.y + b.y) / 2 - 6); t.textContent = l.cost + (l.enabled ? "" : " ✕"); svg.appendChild(t);
+  });
+  G.nodes.forEach(n => {
+    const g = document.createElementNS(NS, "g"); g.setAttribute("class", "node" + (n.router ? " router" : "") + (onRoute.has(n.id) ? " on-route" : ""));
+    g.innerHTML = `<circle cx="${n.x}" cy="${n.y}" r="22"></circle><text x="${n.x}" y="${n.y + 4}">${esc((n.label || n.id).slice(0, 8))}</text>`;
+    g.querySelector("circle").addEventListener("pointerdown", ev => startDrag(ev, n));
+    svg.appendChild(g);
+  });
+  $("#tb-links").innerHTML = G.links.map((l, i) => `<tr><td class="mono">${esc(l.a)}–${esc(l.b)}</td>
+    <td><input type="number" min="1" max="1000" value="${l.cost}" data-i="${i}" class="form-control form-control-sm cost-in" style="width:70px"></td>
+    <td><input type="checkbox" class="form-check-input en-in" data-i="${i}" ${l.enabled ? "checked" : ""}></td>
+    <td><button class="btn btn-sm btn-link text-danger del-link" data-i="${i}">✕</button></td></tr>`).join("") || '<tr><td colspan="4" class="empty">no links</td></tr>';
+}
+function startDrag(ev, n) {
+  ev.preventDefault(); const pt = svg.createSVGPoint();
+  const move = e => { pt.x = e.clientX; pt.y = e.clientY; const p = pt.matrixTransform(svg.getScreenCTM().inverse()); n.x = Math.max(24, Math.min(736, p.x)); n.y = Math.max(24, Math.min(436, p.y)); draw(); };
+  const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+  window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+}
+$("#tb-links").addEventListener("input", e => { const i = +e.target.dataset.i; if (e.target.classList.contains("cost-in")) G.links[i].cost = Math.max(1, +e.target.value || 1); else if (e.target.classList.contains("en-in")) G.links[i].enabled = e.target.checked; draw(); });
+$("#tb-links").addEventListener("click", e => { if (e.target.classList.contains("del-link")) { G.links.splice(+e.target.dataset.i, 1); route = []; draw(); } });
+$("#btn-add-node").onclick = () => {
+  const id = $("#new-node").value.trim().slice(0, 12); if (!id) return;
+  if (G.nodes.some(n => n.id === id)) return toast("node exists", "error");
+  G.nodes.push({ id, label: id, x: 80 + Math.random() * 600, y: 60 + Math.random() * 340 }); $("#new-node").value = ""; fillSelects(); draw();
+};
+$("#btn-add-link").onclick = () => {
+  const a = $("#l-a").value, b = $("#l-b").value, cost = +$("#l-cost").value;
+  if (!a || !b || a === b) return toast("choose two different nodes", "error");
+  if (!(cost >= 1 && cost <= 1000)) return toast("cost must be 1-1000", "error");
+  const ex = G.links.find(l => key(l.a, l.b) === key(a, b)); if (ex) { ex.cost = cost; ex.enabled = true; } else G.links.push({ a, b, cost, enabled: true }); draw();
+};
+$("#btn-clear").onclick = () => { G = { nodes: [], links: [] }; route = []; lastGraph = lastPath = null; fillSelects(); draw(); $("#results").innerHTML = ""; $("#run-msg").innerHTML = ""; };
+$("#btn-lab").onclick = async () => {
+  const d = await api("{% url 'routing:api_lab' %}");
+  G = d.graph; G.nodes.forEach(n => n.router = /^r\d/.test(n.id)); route = []; lastGraph = lastPath = null; fillSelects(); $("#src").value = "a"; $("#dst").value = "b"; draw();
+  toast("Lab topology loaded as an editable COPY (mode: " + d.mode + ")", "info");
+};
+$("#algo").onchange = () => { $$(".dv-only").forEach(e => e.style.display = $("#algo").value === "distance_vector" ? "" : "none"); };
+function tableHtml(rows) {
+  return '<table class="table table-sm"><thead><tr><th>Dest</th><th>Next hop</th><th>Cost</th></tr></thead><tbody>' +
+    rows.map(r => `<tr><td>${esc(r.dest)}</td><td>${esc(r.next_hop ?? "unreachable")}</td><td>${r.cost ?? "∞"}</td></tr>`).join("") + "</tbody></table>";
+}
+$("#btn-run").onclick = async (e) => {
+  const src = $("#src").value, dst = $("#dst").value; if (!src || !dst) return toast("load or build a topology first", "error");
+  const algo = $("#algo").value; const body = { graph: cloneGraph(), source: src, dest: dst, algorithm: algo, split_horizon: $("#split").checked };
+  if (algo === "distance_vector" && $("#cont").checked && lastGraph) body.previous_graph = lastGraph;
+  setBusy(e.currentTarget, true, "Running…");
+  try {
+    const r = await api("{% url 'routing:api_run' %}", { json: body });
+    route = r.path || []; draw();
+    const changed = lastPath && JSON.stringify(lastPath) !== JSON.stringify(route);
+    $("#run-msg").innerHTML = (r.path ? `<div class="note"><b>Selected route:</b> ${pathHtml(r.path)} &nbsp; cost <b>${r.cost}</b></div>` : `<div class="note bad">No route from ${esc(src)} to ${esc(dst)}${r.problem ? ": " + esc(r.problem) : ""}</div>`)
+      + (changed ? `<div class="note warn mt-2">Route CHANGED: was ${pathHtml(lastPath)}, now ${pathHtml(route)}</div>` : (lastPath ? '<div class="note mt-2">Same route as the previous run.</div>' : ""))
+      + (r.count_to_infinity ? '<div class="note bad mt-2">Count-to-infinity: this took many rounds because split horizon is off. Run again with it on.</div>' : "");
+    lastGraph = cloneGraph(); lastPath = route.slice();
+    let html = "";
+    if (algo === "link_state") {
+      html += `<div class="row g-3"><div class="col-lg-4"><div class="card"><div class="card-header">Link-state database</div><table class="table table-sm"><tbody>${r.lsdb.map(l => `<tr><td>${esc(l.a)}–${esc(l.b)}</td><td>${l.cost}</td><td>${statusPill(l.state)}</td></tr>`).join("")}</tbody></table></div></div>
+        <div class="col-lg-8"><div class="card"><div class="card-header">Dijkstra from ${esc(src)}</div><pre class="out">${esc(r.steps.join("\n"))}</pre></div></div></div>`;
+    } else {
+      html += `<div class="card mb-3"><div class="card-header">Exchange rounds ${r.converged ? pill("converged after " + r.rounds_to_converge + " round(s)", "success") : pill("did not converge", "failed")} ${r.continued_from_previous ? pill("continued from previous tables", "info") : ""}</div><div class="card-body" style="max-height:260px;overflow:auto">${r.rounds.map(x => `<div class="mb-2"><b>Round ${x.round}</b><ul class="mb-0 small">${x.updates.map(u => `<li>${esc(u)}</li>`).join("")}</ul></div>`).join("")}</div></div>`;
+    }
+    html += '<div class="row g-3 mt-1">' + Object.entries(r.tables).map(([n, rows]) => `<div class="col-md-4 col-xl-3"><div class="card"><div class="card-header">Routing table of ${esc(n)}</div>${tableHtml(rows)}</div></div>`).join("") + "</div>";
+    $("#results").innerHTML = html;
+  } catch (err) { $("#run-msg").innerHTML = `<div class="note bad">${esc(err.message)}</div>`; }
+  setBusy(e.currentTarget, false);
+};
+$("#btn-save").onclick = async () => { try { const r = await api("{% url 'routing:api_save' %}", { json: { name: $("#save-name").value, graph: cloneGraph() } }); toast("saved " + r.saved, "success"); } catch (e) { toast(e.message, "error"); } };
+$("#saved").onchange = async () => { if (!$("#saved").value) return; const r = await api("{% url 'routing:api_saved' %}?name=" + encodeURIComponent($("#saved").value)); G = r.graph; route = []; lastGraph = lastPath = null; fillSelects(); draw(); };
+$("#btn-kernel").onclick = async () => { const d = await api("{% url 'routing:api_kernel_routes' %}?node=" + $("#k-node").value); $("#kernel-out").textContent = d.live ? `[${d.node}] ip route show\n\n${d.output}` : "lab not live: " + d.reason; };
+$("#btn-lab").click();
+</script>
+{% endblock %}

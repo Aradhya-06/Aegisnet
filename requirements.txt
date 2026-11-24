@@ -1,0 +1,5 @@
+Django>=5.1
+psutil>=5.9
+scapy>=2.5
+cryptography>=42.0        # only to create the self-signed certificate of the HTTPS/TLS test server
+# Optional ML extension (see requirements-ml.txt)

@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Fault & Recovery{% endblock %}
+{% block heading %}Fault detection &amp; self-healing{% endblock %}
+{% block content %}
+<div class="note mb-3" id="mode-note"></div>
+
+<div class="row g-3 mb-3">
+  <div class="col-xl-5">
+    <div class="card mb-3"><div class="card-header">1 · Controlled failure injection</div><div class="card-body">
+      <div class="row g-2 align-items-end">
+        <div class="col-5"><label class="form-label small">Link to disable</label><select id="f-link" class="form-select form-select-sm"></select></div>
+        <div class="col-7 d-flex flex-column gap-1">
+          <div class="form-check"><input class="form-check-input" type="checkbox" id="f-dry"><label class="form-check-label small" for="f-dry">dry-run (show what would happen)</label></div>
+          <div class="form-check"><input class="form-check-input" type="checkbox" id="f-confirm"><label class="form-check-label small" for="f-confirm"><b>I confirm</b> this disables a link in the isolated test network</label></div></div>
+        <div class="col-12 d-flex gap-2 flex-wrap"><button class="btn btn-sm btn-outline-danger" id="btn-inject"><i class="bi bi-lightning-charge"></i> Inject link failure</button>
+          <button class="btn btn-sm btn-outline-secondary" id="btn-restore"><i class="bi bi-arrow-counterclockwise"></i> Rollback / restore all</button></div>
+        <div class="col-12 small text-secondary">Only lab links can be named; nothing outside the aegis_* namespaces is touched and the host's default route is never modified.</div>
+      </div>
+      <hr><div class="small fw-semibold mb-1">Service failure</div>
+      <div class="chip-row" id="svc-chips"><span class="text-secondary small">start a TCP server on the TCP / UDP page first</span></div>
+    </div></div>
+    <div class="card"><div class="card-header">2 · Detector <span id="det-state"></span></div><div class="card-body">
+      <div class="d-flex flex-wrap gap-2 mb-2"><button class="btn btn-sm btn-accent" id="btn-detect">Run one detection cycle</button>
+        <button class="btn btn-sm btn-outline-accent" id="btn-det-start">Start background detector</button><button class="btn btn-sm btn-outline-secondary" id="btn-det-stop">Stop</button></div>
+      <div class="form-check"><input class="form-check-input" type="checkbox" id="auto"><label class="form-check-label small" for="auto">automatic recovery (the detector hands a broken path to the recovery engine)</label></div>
+      <div class="form-check"><input class="form-check-input" type="checkbox" id="rec-dry"><label class="form-check-label small" for="rec-dry">recovery dry-run (plan only)</label></div>
+      <hr><div class="small fw-semibold mb-1">Thresholds</div>
+      <table class="table table-sm mb-0"><tbody>{% for t in thresholds %}<tr><td class="small">{{ t.description }}</td><td style="width:110px"><div class="input-group input-group-sm"><input class="form-control th-in" data-key="{{ t.key }}" value="{{ t.value }}"><button class="btn btn-outline-secondary th-save" data-key="{{ t.key }}">Save</button></div></td></tr>{% endfor %}</tbody></table>
+    </div></div>
+  </div>
+  <div class="col-xl-7">
+    <div class="card mb-3"><div class="card-header">Links (observed by ping across each link)</div><div class="table-responsive"><table class="table table-sm"><thead><tr><th>Link</th><th>Between</th><th>Status</th><th class="text-end">RTT ms</th><th class="text-end">Loss</th></tr></thead><tbody id="tb-links"></tbody></table></div></div>
+    <div class="card mb-3"><div class="card-header">3 · End-to-end paths</div><div class="table-responsive"><table class="table table-sm"><thead><tr><th>Flow</th><th>Status</th><th>Current path</th><th class="text-end">RTT</th><th></th></tr></thead><tbody id="tb-flows"></tbody></table></div>
+      <!--<div class="card-footer bg-transparent small text-secondary">“Recover now” asks the routing module (Dijkstra on the lab graph) for the best path, installs <code>ip route replace</code> in the lab routers, then pings to verify.</div></div>-->
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-lg-6"><div class="card h-100"><div class="card-header">Detected problems</div><div class="table-responsive"><table class="table table-sm"><thead><tr><th>Time</th><th>Severity</th><th>Problem</th><th>Suggested action</th></tr></thead><tbody id="tb-alerts"></tbody></table></div></div></div>
+  <div class="col-lg-6"><div class="card h-100"><div class="card-header">Recovery history</div><div class="card-body p-0" id="recoveries"></div></div></div>
+</div>
+<div class="card mt-3"><div class="card-header">Injection log</div><div class="table-responsive"><table class="table table-sm"><thead><tr><th>Time</th><th>Action</th><th>Target</th><th>Mode</th><th>Result</th></tr></thead><tbody id="tb-inj"></tbody></table></div></div>
+{% endblock %}
+{% block scripts %}
+<script>
+let S = null, linksFilled = false;
+const URL = { state: "{% url 'recovery:api_state' %}", inject: "{% url 'recovery:api_inject' %}", restore: "{% url 'recovery:api_restore' %}", detect: "{% url 'recovery:api_detect' %}",
+              recover: "{% url 'recovery:api_recover' %}", detector: "{% url 'recovery:api_detector' %}", svc: "{% url 'recovery:api_service_failure' %}", th: "{% url 'recovery:api_threshold' %}" };
+const flag = (id) => $(id).checked ? "1" : "0";
+
+function render(s) {
+  S = s;
+  $("#mode-note").className = "note" + (s.lab.live ? "" : " warn");
+  $("#mode-note").innerHTML = s.lab.live ? ""
+    : " " + esc(s.lab.reason) + "";
+  if (!linksFilled) { $("#f-link").innerHTML = s.links.map(l => `<option value="${esc(l.name)}">${esc(l.name)}</option>`).join(""); linksFilled = true; }
+  $("#tb-links").innerHTML = s.links.map(l => `<tr><td class="mono">${esc(l.name)}</td><td>${esc(l.a)} – ${esc(l.b)}</td><td>${statusPill(l.status)}${l.admin_down ? ' <span class="small text-danger">injected</span>' : ""}</td><td class="text-end mono">${fmtNum(l.latency, 3)}</td><td class="text-end mono">${fmtNum(l.loss, 0, "%")}</td></tr>`).join("");
+  $("#tb-flows").innerHTML = s.flows.map(f => `<tr><td><b>${esc(f.name)}</b></td><td>${statusPill(f.status)}</td><td>${pathHtml(f.path)}${JSON.stringify(f.path) !== JSON.stringify(f.primary) ? ' <span class="pill pill-warning">rerouted</span>' : ""}</td><td class="text-end mono">${fmtNum(f.latency, 3)}</td>
+    <td class="text-end"><button class="btn btn-sm btn-outline-accent rec-btn" data-id="${f.id}">Recover now</button></td></tr>`).join("");
+  $("#tb-alerts").innerHTML = s.alerts.map(a => `<tr class="${a.resolved ? "text-secondary" : ""}"><td class="mono">${esc(a.created)}</td><td>${pill(a.severity)}${a.resolved ? "<br>" + pill("resolved " + a.resolved_at, "ok") : ""}</td><td><b>${esc(a.kind)}</b> · ${esc(a.target)}<div class="small">${esc(a.reason)}</div></td><td class="small">${esc(a.action)}</td></tr>`).join("") || '<tr><td colspan="4" class="empty">no problems detected</td></tr>';
+  $("#recoveries").innerHTML = s.recoveries.length ? s.recoveries.map(e => `<div class="p-3 border-bottom"><div class="d-flex flex-wrap gap-2 align-items-center mb-1"><span class="mono small">${esc(e.created)}</span> ${pill(e.result)} <b>${esc(e.flow)}</b> ${pill(e.mode)} ${e.dry_run ? pill("dry-run", "dry_run") : ""} ${pill(e.trigger, "info")}${e.verified ? " " + pill("verified", "success") : ""}</div>
+      <div class="small mb-1">${esc(e.message)}</div><div class="small">${pathHtml(e.old)} <span class="path-arrow">⇒</span> ${pathHtml(e.new)}${e.failed.length ? ` · failed link: <b>${esc(e.failed.join(", "))}</b>` : ""}</div>
+      ${e.commands.length ? `<pre class="out mt-2" style="max-height:120px">${e.commands.map(c => esc(`[${c.node}] ${c.command}  ${c.ok === true ? "OK" : c.ok === false ? "FAILED " + c.output : "(simulated)"}`)).join("\n")}</pre>` : ""}
+      ${e.verification ? `<div class="small text-secondary mt-1">verification: ${esc(e.verification)}</div>` : ""}${e.ms ? `<div class="small text-secondary">took ${e.ms} ms</div>` : ""}</div>`).join("") : '<div class="empty">no recovery attempts yet</div>';
+  $("#tb-inj").innerHTML = s.injections.map(i => `<tr><td class="mono">${esc(i.created)}</td><td>${esc(i.kind)}${i.dry_run ? " (dry-run)" : ""}</td><td class="mono">${esc(i.target)}</td><td>${pill(i.mode)}</td><td>${pill(i.ok ? "ok" : "failed", i.ok ? "success" : "failed")}</td></tr>`).join("") || '<tr><td colspan="5" class="empty">none</td></tr>';
+  $("#det-state").innerHTML = s.detector.running ? pill("running in background", "success") : pill("not running", "unknown");
+  $("#svc-chips").innerHTML = s.services.length ? s.services.map(v => `<span class="chip">${esc(v.name)} ${v.running ? statusPill("up") : (v.expected ? statusPill("down") : statusPill("unknown"))}
+    ${v.running ? `<button class="btn btn-sm btn-link text-danger p-0 ms-2 svc-btn" data-act="inject" data-name="${esc(v.name)}">crash</button>` : `<button class="btn btn-sm btn-link p-0 ms-2 svc-btn" data-act="restore" data-name="${esc(v.name)}">restart</button>`}</span>`).join("")
+    : '<span class="text-secondary small">start a TCP server on the TCP / UDP page first</span>';
+}
+async function refresh() { try { render(await api(URL.state)); } catch (e) { console.warn(e); } }
+
+$("#btn-inject").onclick = async (e) => {
+  setBusy(e.currentTarget, true, "Injecting…");
+  try { const r = await api(URL.inject, { form: { link: $("#f-link").value, dry_run: flag("#f-dry"), confirm: flag("#f-confirm") } }); toast((r.dry_run ? "[dry-run] " : "") + (r.ok ? "failure injected" : "failed") + " (" + r.mode + ")", r.ok ? "warning" : "error");
+    if (r.output) { toast(r.output.split("\n").slice(-3).join(" | "), "info"); } await refresh(); }
+  catch (err) { toast(err.message, "error"); }
+  setBusy(e.currentTarget, false);
+};
+$("#btn-restore").onclick = async (e) => { setBusy(e.currentTarget, true, "Restoring…"); try { const r = await api(URL.restore, { form: { dry_run: flag("#f-dry") } }); toast(r.ok ? "restored (" + r.mode + ")" : "restore failed: " + r.output, r.ok ? "success" : "error"); await refresh(); } catch (err) { toast(err.message, "error"); } setBusy(e.currentTarget, false); };
+$("#btn-detect").onclick = async (e) => { setBusy(e.currentTarget, true, "Detecting…"); try { const r = await api(URL.detect, { form: { auto_recover: flag("#auto"), dry_run: flag("#rec-dry") } }); toast(`cycle done: ${r.new_alerts.length} new alert(s), ${r.resolved.length} resolved, ${r.recoveries.length} recovery attempt(s)`, "info"); await refresh(); } catch (err) { toast(err.message, "error"); } setBusy(e.currentTarget, false); };
+$("#btn-det-start").onclick = async () => { try { await api(URL.detector, { form: { action: "start", auto_recover: flag("#auto") } }); toast("background detector started", "success"); refresh(); } catch (err) { toast(err.message, "error"); } };
+$("#btn-det-stop").onclick = async () => { try { await api(URL.detector, { form: { action: "stop" } }); toast("detector stopped", "info"); refresh(); } catch (err) { toast(err.message, "error"); } };
+$("#tb-flows").onclick = async (e) => {
+  const b = e.target.closest(".rec-btn"); if (!b) return; setBusy(b, true, "…");
+  try { const r = await api(URL.recover, { form: { flow: b.dataset.id, dry_run: flag("#rec-dry"), confirm: "1" } }); toast(r.event.result + ": " + r.event.message, r.event.result === "success" ? "success" : "warning"); await refresh(); }
+  catch (err) { toast(err.message, "error"); setBusy(b, false); }
+};
+$("#svc-chips").onclick = async (e) => { const b = e.target.closest(".svc-btn"); if (!b) return; try { await api(URL.svc, { form: { name: b.dataset.name, action: b.dataset.act } }); await refresh(); } catch (err) { toast(err.message, "error"); } };
+$$(".th-save").forEach(b => b.onclick = async () => { const v = $(`.th-in[data-key="${b.dataset.key}"]`).value; try { await api(URL.th, { form: { key: b.dataset.key, value: v } }); toast("threshold saved", "success"); } catch (err) { toast(err.message, "error"); } });
+refresh(); setInterval(refresh, 3000);
+</script>
+{% endblock %}

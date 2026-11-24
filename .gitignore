@@ -1,0 +1,9 @@
+data/db.sqlite3
+data/.secret_key
+data/pcaps/
+data/received/
+data/run/
+data/keys/
+data/ml/
+__pycache__/
+.venv/

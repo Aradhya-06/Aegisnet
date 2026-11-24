@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Documentation{% endblock %}
+{% block heading %}Documentation{% endblock %}
+{% block content %}
+<div class="row g-3 mb-3">
+  <div class="col-lg-7"><div class="card h-100"><div class="card-header">What AegisNet is</div><div class="card-body">
+    <p>AegisNet is one integrated platform, not seven experiments. A shared <b>topology model</b> (nodes, links, costs, status) and one <b>event timeline</b> connect every module:</p>
+    <ol class="mb-0">
+      <li><b>Monitoring</b> measures interfaces, throughput, latency and loss (psutil, <code>ip</code>, <code>ping</code>).</li>
+      <li><b>Communication</b> runs real TCP/UDP socket programs inside lab nodes.</li>
+      <li><b>Packet Analyzer</b> captures that exact traffic with tcpdump and decodes it with Scapy (Wireshark/TShark for inspection).</li>
+      <li><b>Routing</b> computes paths (Distance Vector, Dijkstra) on the same graph the lab uses.</li>
+      <li><b>Fault detector</b> probes real links and flows, raises alerts from thresholds.</li>
+      <li><b>Recovery engine</b> asks routing for an alternative path, installs it in the lab routers, verifies with ping, records the result.</li>
+      <li><b>NS2</b> is a separate simulator (clearly labelled simulated) to compare normal / congested / failed-link networks.</li>
+    </ol></div></div></div>
+  <div class="col-lg-5"><div class="card h-100"><div class="card-header">Test network</div><div class="card-body">
+<pre class="out" style="font-size:.78rem">              primary (cost 1)
+ PC A ── R1 ──────────────────── R2 ── PC B
+          \                      /
+           ╰──── R3 ───────────╯   backup path
+                 │
+               PC C
+
+6 namespaces aegis_{a,r1,r2,r3,b,c}
+6 veth links, /30 subnets 10.10.1-6.0/30
+Failure demo: r1-r2 down → A→B moves to
+A-R1-R3-R2-B</pre>
+    <p class="small text-secondary mt-2 mb-0">Created by <code>scripts/setup_network.sh</code>; only objects named <code>aegis_*</code> are ever created, changed or deleted.</p></div></div></div>
+</div>
+
+<div class="card mb-3"><div class="card-header">Course outcome mapping (each row points to a feature that runs)</div><div class="table-responsive"><table class="table"><thead><tr><th>CO</th><th>Concept</th><th>Where</th><th>What you can demonstrate</th></tr></thead><tbody>
+  {% for co, topic, where, demo in co_map %}<tr><td><b>{{ co }}</b></td><td>{{ topic }}</td><td>{{ where }}</td><td class="small">{{ demo }}</td></tr>{% endfor %}</tbody></table></div></div>
+
+<div class="card mb-3"><div class="card-header">Final demonstration script</div><div class="card-body"><ol class="mb-0">
+  <li>Start Django, sign in, show the Dashboard (mode badge says LIVE).</li>
+  <li><code>sudo scripts/setup_network.sh</code> → Dashboard “Probe links”: six links up, with addresses on the Monitoring page (CO1).</li>
+  <li>TCP / UDP page: start servers, send a message and the sample file from PC A to PC B; read the handshake/FIN steps (CO2).</li>
+  <li>Packet Analyzer: capture on <code>r1 / r1-a</code> with HTTP, DNS, TLS, TCP, UDP and ICMP traffic; open the TLS handshake and the PCAP in Wireshark (CO4).</li>
+  <li>Routing Visualizer: load the lab topology, run Dijkstra and Distance Vector for A→B, disable <code>r1-r2</code>, run again and watch the route change (CO3).</li>
+  <li>Fault &amp; Recovery: start the background detector with auto-recovery, tick confirm, inject a failure on <code>r1-r2</code>.</li>
+  <li>The detector raises link/interface alerts, the A→B path breaks, recovery installs A-R1-R3-R2-B and verifies with ping.</li>
+  <li>Show the recovery history and the real routes (<code>ip route</code> on R1/R2). Click “Rollback” to restore.</li>
+  <li>NS2 page: run scenarios A and C and compare throughput, delay, PDR and loss (CO3) — clearly simulated.</li>
+</ol></div></div>
+
+<div class="card"><div class="card-header">Safety rules built in</div><div class="card-body"><ul class="mb-0">
+  <li>All privileged work goes through one allow-listed helper (<code>scripts/ns_exec.py</code>): lab namespaces and 10.10.0.0/16 / 127.0.0.0/8 only, no shell, read-only <code>ip</code> except lab route changes.</li>
+  <li>The host default route, DNS and internet connection are never modified; external addresses are refused by the clients, the helper and the views.</li>
+  <li>Disruptive actions need an explicit confirmation, have a dry-run, and a one-click rollback (<code>restore_network.sh</code>).</li>
+  <li>Packet capture is limited to lab interfaces (or loopback) and stores metadata only.</li>
+  <li>If namespaces or root are unavailable the system says so and runs a clearly labelled simulation instead.</li>
+</ul></div></div>
+{% endblock %}
