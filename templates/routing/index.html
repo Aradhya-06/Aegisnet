@@ -105,10 +105,13 @@ function tableHtml(rows) {
     rows.map(r => `<tr><td>${esc(r.dest)}</td><td>${esc(r.next_hop ?? "unreachable")}</td><td>${r.cost ?? "∞"}</td></tr>`).join("") + "</tbody></table>";
 }
 $("#btn-run").onclick = async (e) => {
-  const src = $("#src").value, dst = $("#dst").value; if (!src || !dst) return toast("load or build a topology first", "error");
-  const algo = $("#algo").value; const body = { graph: cloneGraph(), source: src, dest: dst, algorithm: algo, split_horizon: $("#split").checked };
+  const btn = e.currentTarget;
+  const src = $("#src").value, dst = $("#dst").value;
+  if (!src || !dst) return toast("load or build a topology first", "error");
+  const algo = $("#algo").value;
+  const body = { graph: cloneGraph(), source: src, dest: dst, algorithm: algo, split_horizon: $("#split").checked };
   if (algo === "distance_vector" && $("#cont").checked && lastGraph) body.previous_graph = lastGraph;
-  setBusy(e.currentTarget, true, "Running…");
+  setBusy(btn, true, "Running…");
   try {
     const r = await api("{% url 'routing:api_run' %}", { json: body });
     route = r.path || []; draw();
@@ -126,8 +129,11 @@ $("#btn-run").onclick = async (e) => {
     }
     html += '<div class="row g-3 mt-1">' + Object.entries(r.tables).map(([n, rows]) => `<div class="col-md-4 col-xl-3"><div class="card"><div class="card-header">Routing table of ${esc(n)}</div>${tableHtml(rows)}</div></div>`).join("") + "</div>";
     $("#results").innerHTML = html;
-  } catch (err) { $("#run-msg").innerHTML = `<div class="note bad">${esc(err.message)}</div>`; }
-  setBusy(e.currentTarget, false);
+  } catch (err) {
+    $("#run-msg").innerHTML = `<div class="note bad">${esc(err.message)}</div>`;
+  } finally {
+    setBusy(btn, false);
+  }
 };
 $("#btn-save").onclick = async () => { try { const r = await api("{% url 'routing:api_save' %}", { json: { name: $("#save-name").value, graph: cloneGraph() } }); toast("saved " + r.saved, "success"); } catch (e) { toast(e.message, "error"); } };
 $("#saved").onchange = async () => { if (!$("#saved").value) return; const r = await api("{% url 'routing:api_saved' %}?name=" + encodeURIComponent($("#saved").value)); G = r.graph; route = []; lastGraph = lastPath = null; fillSelects(); draw(); };

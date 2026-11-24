@@ -16,63 +16,120 @@
 <div class="row g-3 mb-3">
   <div class="col-lg-8">
     <div class="card h-100">
-      <div class="card-header"><span>Traffic <span class="text-secondary fw-normal small" id="traffic-src"></span></span>
-        <button class="btn btn-sm btn-outline-accent" id="btn-probe"><i class="bi bi-broadcast"></i> Probe links</button></div>
-      <div class="card-body"><div class="chart-box"><canvas id="ch-traffic"></canvas></div>
-        <div class="how mt-2">Throughput = counter difference ÷ time between two readings of the kernel interface counters. Lab traffic is summed over every veth link; nothing is generated.</div></div>
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span>Traffic <span class="text-secondary fw-normal small" id="traffic-src"></span></span>
+        <button class="btn btn-sm btn-outline-accent" id="btn-probe"><i class="bi bi-broadcast"></i> Probe links</button>
+      </div>
+      <div class="card-body">
+        <div class="chart-box"><canvas id="ch-traffic"></canvas></div>
+        <div class="how mt-2">Throughput = counter difference ÷ time between two readings of the kernel interface counters. Lab traffic is summed over every veth link; nothing is generated.</div>
+      </div>
     </div>
   </div>
   <div class="col-lg-4">
     <div class="card h-100">
       <div class="card-header">Lab links</div>
-      <div class="card-body p-0"><table class="table table-sm"><thead><tr><th>Link</th><th>Status</th><th>RTT</th><th>Loss</th></tr></thead><tbody id="tb-links">
-        {% for l in links %}<tr><td class="mono">{{ l.name }}</td><td>…</td><td></td><td></td></tr>{% endfor %}</tbody></table></div>
+      <div class="card-body p-0">
+        <table class="table table-sm mb-0">
+          <thead><tr><th>Link</th><th>Status</th><th>RTT</th><th>Loss</th></tr></thead>
+          <tbody id="tb-links">
+            {% for l in links %}<tr><td class="mono">{{ l.name }}</td><td>…</td><td></td><td></td></tr>{% endfor %}
+          </tbody>
+        </table>
+      </div>
     </div>
   </div>
 </div>
 
-<!--<div class="row g-3">
+<!--
+<div class="row g-3">
   <div class="col-lg-4"><div class="card h-100"><div class="card-header">Recent alerts <a class="small" href="{% url 'recovery:index' %}">open</a></div><div class="card-body p-0" id="alerts"><div class="empty">loading…</div></div></div></div>
   <div class="col-lg-4"><div class="card h-100"><div class="card-header">Recent recovery events <a class="small" href="{% url 'recovery:index' %}">open</a></div><div class="card-body p-0" id="recoveries"><div class="empty">loading…</div></div></div></div>
   <div class="col-lg-4"><div class="card h-100"><div class="card-header">Event timeline</div><div class="card-body timeline" id="timeline"><div class="empty">loading…</div></div></div></div>
-</div>-->
+</div>
+-->
 {% endblock %}
+
 {% block scripts %}
 <script>
 const chart = lineChart($("#ch-traffic"), [
   { label: "lab traffic (Mbit/s)", borderColor: PALETTE[0], backgroundColor: PALETTE[0] },
-  { label: "host traffic (Mbit/s)", borderColor: PALETTE[2], backgroundColor: PALETTE[2] }], "Mbit/s");
-const OVERALL = { healthy: ["Healthy", "all links answer probes"], warning: ["Warning", "a link is degraded"],
-                  degraded: ["Degraded", "a link or path is down"], unknown: ["Unknown", "press “Probe links”"] };
+  { label: "host traffic (Mbit/s)", borderColor: PALETTE[2], backgroundColor: PALETTE[2] }
+], "Mbit/s");
+
+const OVERALL = {
+  healthy: ["Healthy", "all links answer probes"],
+  warning: ["Warning", "a link is degraded"],
+  degraded: ["Degraded", "a link or path is down"],
+  unknown: ["Unknown", "press “Probe links”"]
+};
 
 function render(d) {
   const [txt, sub] = OVERALL[d.overall] || ["—", ""];
-  $("#v-overall").textContent = txt; $("#s-overall").textContent = d.mode === "live" ? sub : "simulation mode: " + sub;
+  $("#v-overall").textContent = txt;
+  $("#s-overall").textContent = d.mode === "live" ? sub : "simulation mode: " + sub;
   $("#c-overall").className = "card stat status-" + d.overall;
   $("#v-if").textContent = d.interfaces_up + " / " + d.interfaces;
   $("#v-conn").textContent = (d.connections_host ?? "—") + " · " + (d.connections_lab ?? "—");
-  $("#v-bytes").innerHTML = (d.lab_tx_bytes !== null ? fmtBytes(d.lab_tx_bytes) + " ↑ / " + fmtBytes(d.lab_rx_bytes) + " ↓" : fmtBytes(d.host_tx_bytes) + " ↑ / " + fmtBytes(d.host_rx_bytes) + " ↓");
+  $("#v-bytes").innerHTML = (d.lab_tx_bytes !== null
+    ? fmtBytes(d.lab_tx_bytes) + " ↑ / " + fmtBytes(d.lab_rx_bytes) + " ↓"
+    : fmtBytes(d.host_tx_bytes) + " ↑ / " + fmtBytes(d.host_rx_bytes) + " ↓");
   $("#s-bytes").textContent = d.lab_tx_bytes !== null ? "lab links (per-hop counters, sum)" : "host totals (lab not live)";
   $("#v-util").textContent = fmtNum(d.utilization_pct, 1, " %");
   $("#v-lat").textContent = fmtNum(d.latency_ms, 3, " ms");
   $("#v-loss").textContent = fmtNum(d.loss_pct, 1, " %");
   $("#v-alerts").textContent = d.alerts.filter(a => !a.resolved).length;
   $("#traffic-src").textContent = d.mode === "live" ? "· live namespace lab" : "· host only (lab not live)";
-  pushPoint(chart, new Date(d.t * 1000).toLocaleTimeString(), [d.lab_rate_bps === null ? null : d.lab_rate_bps / 1e6, d.host_rate_bps / 1e6]);
-  $("#tb-links").innerHTML = d.links.map(l => `<tr><td class="mono">${esc(l.name)}</td><td>${statusPill(l.status)}</td><td class="mono">${fmtNum(l.latency, 3)}</td><td class="mono">${fmtNum(l.loss, 0, "%")}</td></tr>`).join("");
-  $("#alerts").innerHTML = d.alerts.length ? '<table class="table table-sm"><tbody>' + d.alerts.map(a =>
-      `<tr><td class="mono">${esc(a.time)}</td><td>${pill(a.severity)} ${a.resolved ? pill("resolved", "ok") : ""}<div class="small">${esc(a.reason)}</div></td></tr>`).join("") + "</tbody></table>" : '<div class="empty">no alerts</div>';
-  $("#recoveries").innerHTML = d.recoveries.length ? '<table class="table table-sm"><tbody>' + d.recoveries.map(r =>
-      `<tr><td class="mono">${esc(r.time)}</td><td>${pill(r.result)} <b>${esc(r.flow)}</b> ${pill(r.mode)}<div class="small">${esc(r.message)}</div></td></tr>`).join("") + "</tbody></table>" : '<div class="empty">no recovery events yet</div>';
-  $("#timeline").innerHTML = d.timeline.length ? d.timeline.map(e => `<div class="row-ev"><span class="mono text-secondary">${esc(e.time)}</span><span class="src">${esc(e.source)}</span><span><span class="dot ${esc(e.level)}"></span>${esc(e.message)}</span></div>`).join("") : '<div class="empty">no events yet</div>';
+
+  pushPoint(chart, new Date(d.t * 1000).toLocaleTimeString(), [
+    d.lab_rate_bps === null ? null : d.lab_rate_bps / 1e6,
+    d.host_rate_bps / 1e6
+  ]);
+
+  $("#tb-links").innerHTML = d.links.map(l =>
+    `<tr><td class="mono">${esc(l.name)}</td><td>${statusPill(l.status)}</td><td class="mono">${fmtNum(l.latency, 3)}</td><td class="mono">${fmtNum(l.loss, 0, "%")}</td></tr>`
+  ).join("");
+
+  if ($("#alerts")) {
+    $("#alerts").innerHTML = d.alerts.length ? '<table class="table table-sm mb-0"><tbody>' + d.alerts.map(a =>
+      `<tr><td class="mono">${esc(a.time)}</td><td>${pill(a.severity)} ${a.resolved ? pill("resolved", "ok") : ""}<div class="small">${esc(a.reason)}</div></td></tr>`
+    ).join("") + "</tbody></table>" : '<div class="empty">no alerts</div>';
+  }
+  if ($("#recoveries")) {
+    $("#recoveries").innerHTML = d.recoveries.length ? '<table class="table table-sm mb-0"><tbody>' + d.recoveries.map(r =>
+      `<tr><td class="mono">${esc(r.time)}</td><td>${pill(r.result)} <b>${esc(r.flow)}</b> ${pill(r.mode)}<div class="small">${esc(r.message)}</div></td></tr>`
+    ).join("") + "</tbody></table>" : '<div class="empty">no recovery events yet</div>';
+  }
+  if ($("#timeline")) {
+    $("#timeline").innerHTML = d.timeline.length ? d.timeline.map(e =>
+      `<div class="row-ev"><span class="mono text-secondary">${esc(e.time)}</span><span class="src">${esc(e.source)}</span><span><span class="dot ${esc(e.level)}"></span>${esc(e.message)}</span></div>`
+    ).join("") : '<div class="empty">no events yet</div>';
+  }
 }
-async function tick() { try { render(await api("{% url 'core:api_dashboard' %}")); } catch (e) { console.warn(e); } }
+
+async function tick() {
+  try {
+    render(await api("{% url 'core:api_dashboard' %}"));
+  } catch (e) {
+    console.warn(e);
+  }
+}
+
 $("#btn-probe").onclick = async (ev) => {
-  setBusy(ev.currentTarget, true, "Probing…");
-  try { const r = await api("{% url 'core:api_probe' %}", { post: true }); toast("Probed " + r.links.length + " links in " + r.ms + " ms", "success"); await tick(); }
-  catch (e) { toast(e.message, "error"); }
-  setBusy(ev.currentTarget, false);
+  const btn = ev.currentTarget;
+  setBusy(btn, true, "Probing…");
+  try {
+    const r = await api("{% url 'core:api_probe' %}", { post: true });
+    toast("Probed " + r.links.length + " links in " + r.ms + " ms", "success");
+    await tick();
+  } catch (e) {
+    toast(e.message, "error");
+  } finally {
+    setBusy(btn, false);
+  }
 };
-tick(); setInterval(tick, 3000);
+
+tick();
+setInterval(tick, 3000);
 </script>
 {% endblock %}
