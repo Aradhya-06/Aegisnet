@@ -7,7 +7,7 @@ NAV = [
     ("packet_analyzer:index", "search", "Packet Analyzer"),
     ("routing:index", "diagram-3", "Routing Visualizer"),
     ("simulation:index", "cpu", "NS2 Simulation"),
-    #("recovery:index", "heart-pulse", "Fault & Recovery"),
+    ("recovery:index", "heart-pulse", "Fault & Recovery"),
     #("ml_extension:index", "graph-up", "ML Prediction (optional)"),
     #("core:about", "info-circle", "Documentation"),
 ]

@@ -130,7 +130,10 @@ def run_script(name: str, *args: str, timeout=60) -> CmdResult:
         if prefix is None:
             return CmdResult(cmd, 126, error="root or sudo is required")
         cmd = prefix + cmd
-    return run(cmd, timeout=timeout)
+    res = run(cmd, timeout=timeout)
+    if res.returncode == 126 and "Permission denied" in res.error:
+        res.error += " - the script is not executable: run  chmod +x scripts/*.sh scripts/ns_exec.py"
+    return res
 
 
 # --------------------------------------------------------------------------- lab status
@@ -164,13 +167,13 @@ def lab_status(force: bool = False) -> dict:
         missing = [n for n in LAB_NODES if n not in present]
         privileged = _can_exec_privileged() if not missing else False
         if FORCE_SIM:
-            live, reason = False, ""#simulation forced by AEGISNET_FORCE_SIM=1
+            live, reason = False, "Simulation forced by AEGISNET_FORCE_SIM=1."
         elif missing:
-            live, reason = False, ("")#lab network not set up (missing namespaces: " + ", ".join(missing) + "). Run scripts/setup_network.sh
+            live, reason = False, ("Lab network not set up (missing namespaces: " + ", ".join(missing) + "). Run scripts/setup_network.sh - showing SIMULATED mode.")
         elif not privileged:
-            live, reason = False, ""#namespaces exist but this user cannot run the privileged helper (see scripts/print_sudoers.sh)
+            live, reason = False, "Namespaces exist but this user cannot run the privileged helper (see scripts/print_sudoers.sh)."
         else:
-            live, reason = True, ""#isolated namespace lab is running
+            live, reason = True, "Isolated namespace lab is running."
         value = {"live": live, "mode": "live" if live else "simulated", "namespaces": present,
                  "missing": missing, "privileged": privileged, "reason": reason}
         _status_cache.update(t=now, value=value)
